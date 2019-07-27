@@ -1,0 +1,14 @@
+{
+  "name": "sqlserver-jsonschema",
+  "version": "0.0.1",
+  "description": "mssql table to json schema",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Laurie Odgers",
+  "license": "MIT",
+  "dependencies": {
+    "mssql": "^5.1.0"
+  }
+}
