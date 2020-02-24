@@ -12,9 +12,13 @@ module.exports = class MssqlJson {
         self.password = obj.password
         self.host = obj.host
         self.dbName = obj.dbName
+        self.tableName = obj.tableName
+
+        self.rawSql = null
     }
 
-    async getJsonSchema(obj) {
+    // gets and stores the TSQL create statement for the given table
+    async initialize() {
         var self = this;
 
         // connect to mssql
@@ -24,21 +28,66 @@ module.exports = class MssqlJson {
         var createTableTsql = fs.readFileSync('createtable.sql');
 
         // substitute out the table name
-        createTableTsql = createTableTsql.toString().replace('{{TABLE_NAME}}', obj.tableName)
+        createTableTsql = createTableTsql.toString().replace('{{TABLE_NAME}}', self.tableName)
 
         const request = new sql.Request()
 
-        var rawResult
-
         request.on('info', info => {
-            rawResult = info
+            // sanitise and store the raw create tsql
+            self.rawSql = info.message.replace(new RegExp('\r', 'g'), '\n').replace(new RegExp('\t', 'g'), ' ')
         })
 
         // run the tsql
         await request.query(createTableTsql)
+    }
 
-        // sanitise the info message
-        var result = rawResult.message.replace(new RegExp('\r', 'g'), '\n').replace(new RegExp('\t', 'g'), ' ')
+    // get a list of the primary keys
+    async getPrimaryKeys() {
+        var self = this
+
+        var primaryKeys = []
+        // loop over and find the lines starting with CONSTRAINT
+        self.rawSql.split('\n').forEach(function (rawLine, index) {
+            var line = self.sanitizeLine(rawLine)
+
+            if (line.startsWith('CONSTRAINT ')) {
+                // use regex groups to extract the info we want
+                var regexGroups = line.match(/CONSTRAINT \[(.*)\] PRIMARY KEY \(\[(.*)\] (.*)\)/)
+
+                // save the key name
+                primaryKeys.push({
+                    keyName: regexGroups[1],
+                    columnName: regexGroups[2],
+                    orderBy: regexGroups[3]
+                })
+            }
+        })
+
+        return primaryKeys
+    }
+
+    // get a list of foreign keys
+    async getForeignKeys() {
+
+    }
+
+    // removes anything unnecessary to what we're looking for
+    sanitizeLine(rawLine) {
+        // remove leading and trailing whitespace
+        var line = rawLine.trim()
+
+        // trim first char if its a comma
+        if (line.charAt(0) === ',') {
+            line = line.substr(1)
+            line = line.trim()
+        }
+
+        return line
+    }
+
+    // creates and returns a json schema from tsql
+    async getJsonSchema(obj) {
+        var self = this;
 
         // start creating the schema
         var jsonSchema = {
@@ -51,17 +100,13 @@ module.exports = class MssqlJson {
         var required = []
 
         // interpret the info message and create json schema
-        result.split('\n').forEach(function (line, index) {
-            // remove leading and trailing whitespace
-            line = line.trim()
-
-            // trim first char if its a comma
-            if (line.charAt(0) === ',') {
-                line = line.substr(1)
-                line = line.trim()
-            }
+        self.rawSql.split('\n').forEach(function (rawLine, index) {
+            var line = self.sanitizeLine(rawLine)
 
             // ignore lines we're not interested in
+            // TODO: these are important:
+            // CONSTRAINT - primary key(s)
+            // ALTER TABLE - foreign keys
             if (
                 line.startsWith("CREATE") ||
                 line.startsWith("ALTER TABLE") ||
